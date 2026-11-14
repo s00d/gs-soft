@@ -1,0 +1,137 @@
+# Manual only. Runs on the private s00d/gateway-soft-rs checked out here (public repo, free minutes).
+# Same rules as build-app.yml: read-only deploy key, no source-derived caches or artifacts, every
+# command that can print source (compilers, test failures with code frames) runs through
+# ci/quiet.mjs, which hides the output and encrypts it for the owner on failure.
+name: CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or SHA of gateway-soft-rs (empty = its default branch)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  Q: node ${{ github.workspace }}/.ci/ci/quiet.mjs
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: s00d/gateway-soft-rs
+          ref: ${{ inputs.ref }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          path: .ci
+          sparse-checkout: ci
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: "false"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev libssl-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libasound2-dev libdbus-1-dev patchelf
+
+      - name: Install frontend dependencies
+        run: $Q pnpm install --frozen-lockfile
+
+      - name: Frontend check
+        run: $Q pnpm check
+
+      - name: Frontend build
+        run: $Q pnpm build
+
+      - name: Frontend unit tests
+        run: $Q pnpm test
+
+      - name: i18n locale parity
+        run: $Q pnpm i18n:check
+
+      - name: Install Playwright Chromium
+        run: $Q pnpm exec playwright install chromium --with-deps
+
+      - name: Visual fixture smoke
+        working-directory: crates/gs-app
+        run: $Q pnpm exec playwright test ci-fixture-smoke
+
+      - name: Rust tests
+        run: $Q cargo test --workspace
+
+      - name: Cargo check Tauri shell
+        run: $Q cargo check --manifest-path crates/gs-app/src-tauri/Cargo.toml
+
+      - name: Upload the encrypted log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/build-logs/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  coverage:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: s00d/gateway-soft-rs
+          ref: ${{ inputs.ref }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          path: .ci
+          sparse-checkout: ci
+          persist-credentials: false
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: "false"
+
+      - name: Install tarpaulin
+        run: $Q cargo install cargo-tarpaulin --locked
+
+      - name: Coverage gs-at gs-pdu gs-socket
+        run: |
+          $Q cargo tarpaulin -p gs-at --out Xml --fail-under 60 --include-files 'crates/gs-at/*'
+          $Q cargo tarpaulin -p gs-pdu --out Xml --fail-under 60 --include-files 'crates/gs-pdu/*'
+          $Q cargo tarpaulin -p gs-socket --out Xml --fail-under 60 --include-files 'crates/gs-socket/*'
+
+      - name: Upload the encrypted log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/build-logs/
+          if-no-files-found: ignore
+          retention-days: 3

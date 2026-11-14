@@ -1,0 +1,73 @@
+# Manual only. Builds the landing of the private s00d/gateway-soft-rs checked out here (public repo, free minutes).
+# Same rules as build-app.yml: read-only deploy key, no source-derived caches or artifacts, every
+# command that can print source (compilers, test failures with code frames) runs through
+# ci/quiet.mjs, which hides the output and encrypts it for the owner on failure.
+name: Deploy landing
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or SHA of gateway-soft-rs (empty = its default branch)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  Q: node ${{ github.workspace }}/.ci/ci/quiet.mjs
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: s00d/gateway-soft-rs
+          ref: ${{ inputs.ref }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          path: .ci
+          sparse-checkout: ci
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: $Q pnpm install --frozen-lockfile
+
+      - name: Build landing
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: $Q pnpm --filter @gateway/landing build
+
+      # Only the built site (public anyway) goes to gh-pages of this repo.
+      - name: Deploy to gh-pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: packages/landing/dist
+          clean: true
+          single-commit: true
+
+      - name: Upload the encrypted log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.job }}
+          path: ${{ runner.temp }}/build-logs/
+          if-no-files-found: ignore
+          retention-days: 3
