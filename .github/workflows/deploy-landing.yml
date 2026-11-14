@@ -44,23 +44,24 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - name: Install dependencies
         run: $Q pnpm install --frozen-lockfile
 
-      - name: Build landing
+      - name: Build site and docs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: $Q pnpm --filter @gateway/landing build
+          NODE_ENV: production
+        run: $Q pnpm --filter @gateway/docs build
 
       # Only the built site (public anyway) goes to gh-pages of this repo.
       - name: Deploy to gh-pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           branch: gh-pages
-          folder: packages/landing/dist
+          folder: packages/docs/.output/public
           clean: true
           single-commit: true
 
