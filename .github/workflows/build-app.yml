@@ -173,6 +173,63 @@ jobs:
           TARGET: ${{ matrix.rust_targets }}
         run: |
           VERSION="$(node -p "require('./crates/gs-app/package.json').version")"
-          gh release upload "v${VERSION}" --clobber \
-            target/${TARGET}/release/bundle/deb/*.deb \
-            target/${TARGET}/release/bundle/rpm/*.rpm
+          # The .sig files feed the linux-armv7 entries the armv7-updater job adds to latest.json.
+          shopt -s nullglob
+          # -R: the workspace is the gateway-soft-rs checkout, its git remote is not this repo.
+          gh release upload "v${VERSION}" -R "$GITHUB_REPOSITORY" --clobber \
+            target/${TARGET}/release/bundle/deb/*.deb target/${TARGET}/release/bundle/deb/*.deb.sig \
+            target/${TARGET}/release/bundle/rpm/*.rpm target/${TARGET}/release/bundle/rpm/*.rpm.sig
+
+  # tauri-action skips the armv7 bundles (it looks for `_armv7` names, the bundler writes `armhf`), so
+  # latest.json gets no armv7 entry and armv7 installs could not update. After every matrix job (they
+  # all rewrite latest.json), add linux-armv7-deb / -rpm and linux-armv7 from the uploaded .sig files.
+  armv7-updater:
+    needs: [plan, build-tauri]
+    if: ${{ !cancelled() && contains(needs.plan.outputs.matrix, 'linux-armv7') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: s00d/gateway-soft-rs
+          ref: ${{ inputs.ref }}
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          persist-credentials: false
+          sparse-checkout: crates/gs-app/package.json
+          sparse-checkout-cone-mode: false
+
+      - name: Add linux-armv7 to latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./crates/gs-app/package.json').version")"
+          TAG="v${VERSION}"
+          mkdir -p rel && cd rel
+          gh release download "$TAG" -R "$REPO" -p latest.json -p '*armhf.deb.sig' -p '*armhfp.rpm.sig'
+          # API asset URLs, as tauri-action writes them: stable when the draft is published.
+          gh api "repos/$REPO/releases?per_page=100" \
+            --jq "[.[] | select(.tag_name == \"$TAG\") | .assets[] | {name, url}]" > assets.json
+          python3 - <<'PY'
+          import glob, json
+          assets = {a["name"]: a["url"] for a in json.load(open("assets.json"))}
+          manifest = json.load(open("latest.json"))
+          added = []
+          for sig, key in ((glob.glob("*armhf.deb.sig"), "linux-armv7-deb"), (glob.glob("*armhfp.rpm.sig"), "linux-armv7-rpm")):
+              if not sig:
+                  continue
+              package = sig[0][: -len(".sig")]
+              url = assets.get(package)
+              if not url:
+                  raise SystemExit(f"{package} is not in the release")
+              manifest["platforms"][key] = {"signature": open(sig[0]).read().strip(), "url": url}
+              added.append(key)
+          if "linux-armv7-deb" in manifest["platforms"]:
+              manifest["platforms"]["linux-armv7"] = manifest["platforms"]["linux-armv7-deb"]
+              added.append("linux-armv7")
+          if not added:
+              raise SystemExit("no armv7 .sig in the release: the armv7 bundles were not signed")
+          json.dump(manifest, open("latest.json", "w"), indent=2)
+          print("added:", ", ".join(added))
+          PY
+          gh release upload "$TAG" -R "$REPO" --clobber latest.json

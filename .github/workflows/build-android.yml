@@ -143,6 +143,28 @@ jobs:
           EOF
           chmod +x src-tauri/tauri
 
+      # Same release key as Gateway Phone: updates (self-update included) install only over an APK
+      # signed with it.
+      - name: Release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: crates/gs-app/src-tauri/gen/android
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64}" ] || [ -z "${ANDROID_KEY_ALIAS}" ] || [ -z "${ANDROID_KEY_PASSWORD}" ]; then
+            echo "::warning::Signing secrets are not set: the APK will be UNSIGNED (Android refuses to install it)."
+            exit 0
+          fi
+          echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > release.jks
+          {
+            echo "storeFile=release.jks"
+            echo "storePassword=${ANDROID_KEY_PASSWORD}"
+            echo "keyAlias=${ANDROID_KEY_ALIAS}"
+            echo "keyPassword=${ANDROID_KEY_PASSWORD}"
+          } > keystore.properties
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -168,3 +190,7 @@ jobs:
           path: ${{ runner.temp }}/build-logs/
           if-no-files-found: ignore
           retention-days: 3
+
+      - name: Remove the keystore
+        if: always()
+        run: rm -f crates/gs-app/src-tauri/gen/android/release.jks crates/gs-app/src-tauri/gen/android/keystore.properties
