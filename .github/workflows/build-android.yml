@@ -1,0 +1,167 @@
+# Manual only. Builds the private s00d/gateway-soft-rs here, in public, so Actions minutes are free.
+# Nothing of the source may leak from this public repo:
+#  - checkout with a read-only deploy key (SOURCE_DEPLOY_KEY), credentials not kept in .git;
+#  - no caches of source-derived files (rust-cache keeps the crates registry only, not target/);
+#  - build output goes through ci/quiet.mjs: hidden on success, encrypted for the owner on failure
+#    (compiler errors quote source lines); no workflow artifacts other than that encrypted log;
+#  - releases carry only the built binaries.
+name: Build Android
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    name: Build Android APK
+    runs-on: ubuntu-22.04
+    steps:
+      # Four Android targets in release overflow the runner's ~14 GB free disk; drop toolchains
+      # this job never uses.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell /usr/local/lib/heroku
+          df -h /
+
+      - uses: actions/checkout@v4
+        with:
+          repository: s00d/gateway-soft-rs
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          path: .ci
+          sparse-checkout: ci
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # The default also installs the legacy `tools` package, gone from cmdline-tools 16+.
+          packages: platform-tools
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Configure NDK toolchain for C cross-builds (ring, mlua)
+        run: |
+          set -euo pipefail
+          if [ -n "${ANDROID_NDK_HOME:-}" ] && [ -d "$ANDROID_NDK_HOME" ]; then
+            NDK_PATH="$ANDROID_NDK_HOME"
+          elif [ -n "${ANDROID_NDK_ROOT:-}" ] && [ -d "$ANDROID_NDK_ROOT" ]; then
+            NDK_PATH="$ANDROID_NDK_ROOT"
+          else
+            NDK_PATH="$(ls -d "$ANDROID_HOME"/ndk/*/ 2>/dev/null | sort -V | tail -n1)"
+            NDK_PATH="${NDK_PATH%/}"
+          fi
+          if [ -z "$NDK_PATH" ] || [ ! -d "$NDK_PATH" ]; then
+            echo "Could not locate Android NDK" >&2
+            exit 1
+          fi
+          NDK_BIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "Using NDK at $NDK_PATH"
+          echo "$NDK_BIN" >> "$GITHUB_PATH"
+          {
+            echo "ANDROID_NDK_HOME=$NDK_PATH"
+            echo "ANDROID_NDK_ROOT=$NDK_PATH"
+            echo "NDK_HOME=$NDK_PATH"
+          } >> "$GITHUB_ENV"
+          for triple in \
+            aarch64-linux-android \
+            armv7a-linux-androideabi \
+            armv7-linux-androideabi \
+            i686-linux-android \
+            x86_64-linux-android; do
+            for tool in ar ranlib nm strip; do
+              target="$NDK_BIN/$triple-$tool"
+              if [ ! -e "$target" ]; then
+                ln -sf "$NDK_BIN/llvm-$tool" "$target"
+              fi
+            done
+          done
+          API=24
+          {
+            echo "CC_aarch64_linux_android=$NDK_BIN/aarch64-linux-android${API}-clang"
+            echo "CXX_aarch64_linux_android=$NDK_BIN/aarch64-linux-android${API}-clang++"
+            echo "CC_armv7_linux_androideabi=$NDK_BIN/armv7a-linux-androideabi${API}-clang"
+            echo "CXX_armv7_linux_androideabi=$NDK_BIN/armv7a-linux-androideabi${API}-clang++"
+            echo "CC_i686_linux_android=$NDK_BIN/i686-linux-android${API}-clang"
+            echo "CXX_i686_linux_android=$NDK_BIN/i686-linux-android${API}-clang++"
+            echo "CC_x86_64_linux_android=$NDK_BIN/x86_64-linux-android${API}-clang"
+            echo "CXX_x86_64_linux_android=$NDK_BIN/x86_64-linux-android${API}-clang++"
+            for t in aarch64_linux_android armv7_linux_androideabi i686_linux_android x86_64_linux_android; do
+              echo "AR_${t}=$NDK_BIN/llvm-ar"
+              echo "RANLIB_${t}=$NDK_BIN/llvm-ranlib"
+            done
+            echo "OPENSSL_STATIC=1"
+          } >> "$GITHUB_ENV"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: "false"
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Build workspace Tauri plugins
+        run: node .ci/ci/quiet.mjs pnpm run build:plugins
+
+      - name: Prepare Tauri CLI shim for Android Gradle task
+        working-directory: crates/gs-app
+        run: |
+          cat > src-tauri/tauri <<'EOF'
+          #!/usr/bin/env node
+          import { createRequire } from "node:module";
+          const require = createRequire(import.meta.url);
+          require("../node_modules/@tauri-apps/cli/tauri.js");
+          EOF
+          chmod +x src-tauri/tauri
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: node ${{ github.workspace }}/.ci/ci/quiet.mjs pnpm tauri
+          projectPath: crates/gs-app
+          tagName: v__VERSION__
+          releaseName: Gateway Soft v__VERSION__
+          releaseBody: See the assets to download this version and install.
+          releaseDraft: true
+          prerelease: false
+          uploadUpdaterJson: false
+          mobile: android
+          args: --apk
+          # APKs go to the release; workflow artifacts only duplicated them and ate the storage quota.
+          uploadWorkflowArtifacts: false
+
+      - name: Upload the encrypted build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/build-logs/
+          if-no-files-found: ignore
+          retention-days: 3

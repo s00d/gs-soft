@@ -1,0 +1,131 @@
+# Manual only. Builds the private s00d/gateway-soft-rs here, in public, so Actions minutes are free.
+# Nothing of the source may leak from this public repo:
+#  - checkout with a read-only deploy key (SOURCE_DEPLOY_KEY), credentials not kept in .git;
+#  - no caches of source-derived files (rust-cache keeps the crates registry only, not target/);
+#  - build output goes through ci/quiet.mjs: hidden on success, encrypted for the owner on failure
+#    (compiler errors quote source lines); no workflow artifacts other than that encrypted log;
+#  - releases carry only the built binaries.
+name: Build Phone
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  phone:
+    name: Build Gateway Phone APK
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: s00d/gateway-soft-rs
+          ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - uses: actions/checkout@v4
+        with:
+          path: .ci
+          sparse-checkout: ci
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+        with:
+          # The default also installs the legacy `tools` package, gone from cmdline-tools 16+.
+          packages: platform-tools
+
+      - name: Install the Android NDK
+        run: |
+          set -euo pipefail
+          sdkmanager --install "ndk;28.1.13356709"
+          NDK="$ANDROID_HOME/ndk/28.1.13356709"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          {
+            echo "NDK_HOME=$NDK"
+            echo "ANDROID_NDK_HOME=$NDK"
+            # rustls/ring is the only C code (no OpenSSL): it needs the NDK clang per target.
+            echo "CC_aarch64_linux_android=$BIN/aarch64-linux-android26-clang"
+            echo "AR_aarch64_linux_android=$BIN/llvm-ar"
+            echo "CC_armv7_linux_androideabi=$BIN/armv7a-linux-androideabi26-clang"
+            echo "AR_armv7_linux_androideabi=$BIN/llvm-ar"
+          } >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: "false"
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      # The Tauri CLI shim Gradle calls (`node tauri …`) is committed in phone/src-tauri/tauri.
+
+      - name: Release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: phone/src-tauri/gen/android
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64}" ] || [ -z "${ANDROID_KEY_ALIAS}" ] || [ -z "${ANDROID_KEY_PASSWORD}" ]; then
+            echo "::warning::Signing secrets are not set: the APK will be UNSIGNED (Android refuses to install it)."
+            exit 0
+          fi
+          echo "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > release.jks
+          {
+            echo "storeFile=release.jks"
+            echo "storePassword=${ANDROID_KEY_PASSWORD}"
+            echo "keyAlias=${ANDROID_KEY_ALIAS}"
+            echo "keyPassword=${ANDROID_KEY_PASSWORD}"
+          } > keystore.properties
+          echo "Release signing configured (alias ${ANDROID_KEY_ALIAS})."
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: node ${{ github.workspace }}/.ci/ci/quiet.mjs pnpm tauri
+          projectPath: phone
+          mobile: android
+          args: --apk --target aarch64 --target armv7
+          tagName: v__VERSION__
+          releaseName: Gateway Soft v__VERSION__
+          releaseBody: See the assets to download this version and install.
+          releaseDraft: true
+          prerelease: false
+          uploadUpdaterJson: false
+          # APKs go to the release; workflow artifacts only duplicated them and ate the storage quota.
+          uploadWorkflowArtifacts: false
+
+      - name: Upload the encrypted build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.job }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/build-logs/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Remove the keystore
+        if: always()
+        run: rm -f phone/src-tauri/gen/android/release.jks phone/src-tauri/gen/android/keystore.properties
