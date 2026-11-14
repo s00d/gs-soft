@@ -16,6 +16,7 @@ permissions:
   contents: read
 
 env:
+  LOG_PUBLIC_KEY: ${{ secrets.LOG_PUBLIC_KEY }}
   Q: node ${{ github.workspace }}/.ci/ci/quiet.mjs
 
 jobs:

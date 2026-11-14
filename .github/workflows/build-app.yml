@@ -23,6 +23,7 @@ permissions:
   contents: write
 
 env:
+  LOG_PUBLIC_KEY: ${{ secrets.LOG_PUBLIC_KEY }}
   # btleplug (BLE ports) links libdbus on Linux.
   LINUX_DEPS: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libssl-dev libudev-dev libasound2-dev libdbus-1-dev
 

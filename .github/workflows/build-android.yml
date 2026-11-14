@@ -13,6 +13,9 @@ on:
 permissions:
   contents: write
 
+env:
+  LOG_PUBLIC_KEY: ${{ secrets.LOG_PUBLIC_KEY }}
+
 jobs:
   android:
     name: Build Android APK
