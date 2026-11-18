@@ -133,7 +133,7 @@ jobs:
         run: node .ci/ci/quiet.mjs pnpm run build:plugins
 
       - name: Prepare Tauri CLI shim for Android Gradle task
-        working-directory: crates/gs-app
+        working-directory: apps/gateway-soft
         run: |
           cat > src-tauri/tauri <<'EOF'
           #!/usr/bin/env node
@@ -150,7 +150,7 @@ jobs:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        working-directory: crates/gs-app/src-tauri/gen/android
+        working-directory: apps/gateway-soft/src-tauri/gen/android
         run: |
           set -euo pipefail
           if [ -z "${ANDROID_KEYSTORE_BASE64}" ] || [ -z "${ANDROID_KEY_ALIAS}" ] || [ -z "${ANDROID_KEY_PASSWORD}" ]; then
@@ -170,7 +170,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tauriScript: node ${{ github.workspace }}/.ci/ci/quiet.mjs pnpm tauri
-          projectPath: crates/gs-app
+          projectPath: apps/gateway-soft
           tagName: v__VERSION__
           releaseName: Gateway Soft v__VERSION__
           releaseBody: See the assets to download this version and install.
@@ -193,4 +193,4 @@ jobs:
 
       - name: Remove the keystore
         if: always()
-        run: rm -f crates/gs-app/src-tauri/gen/android/release.jks crates/gs-app/src-tauri/gen/android/keystore.properties
+        run: rm -f apps/gateway-soft/src-tauri/gen/android/release.jks apps/gateway-soft/src-tauri/gen/android/keystore.properties

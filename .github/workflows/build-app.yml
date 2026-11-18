@@ -148,7 +148,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tauriScript: node ${{ github.workspace }}/.ci/ci/quiet.mjs pnpm tauri
-          projectPath: crates/gs-app
+          projectPath: apps/gateway-soft
           tagName: ${{ !matrix.manual_upload && 'v__VERSION__' || '' }}
           releaseName: Gateway Soft v__VERSION__
           releaseBody: See the assets to download this version and install.
@@ -172,7 +172,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET: ${{ matrix.rust_targets }}
         run: |
-          VERSION="$(node -p "require('./crates/gs-app/package.json').version")"
+          VERSION="$(node -p "require('./package.json').version")"
           # The .sig files feed the linux-armv7 entries the armv7-updater job adds to latest.json.
           shopt -s nullglob
           # -R: the workspace is the gateway-soft-rs checkout, its git remote is not this repo.
@@ -194,7 +194,7 @@ jobs:
           ref: ${{ inputs.ref }}
           ssh-key: ${{ secrets.SOURCE_DEPLOY_KEY }}
           persist-credentials: false
-          sparse-checkout: crates/gs-app/package.json
+          sparse-checkout: package.json
           sparse-checkout-cone-mode: false
 
       - name: Add linux-armv7 to latest.json
@@ -203,7 +203,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          VERSION="$(node -p "require('./crates/gs-app/package.json').version")"
+          VERSION="$(node -p "require('./package.json').version")"
           TAG="v${VERSION}"
           mkdir -p rel && cd rel
           gh release download "$TAG" -R "$REPO" -p latest.json -p '*armhf.deb.sig' -p '*armhfp.rpm.sig'

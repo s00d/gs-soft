@@ -76,7 +76,7 @@ jobs:
         run: $Q pnpm install --frozen-lockfile
 
       - name: Run E2E tests (tauri-playwright)
-        working-directory: crates/gs-app
+        working-directory: apps/gateway-soft
         shell: bash
         run: $Q ${{ matrix.display }} pnpm test:e2e --project=tauri
 

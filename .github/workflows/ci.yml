@@ -78,14 +78,14 @@ jobs:
         run: $Q pnpm exec playwright install chromium --with-deps
 
       - name: Visual fixture smoke
-        working-directory: crates/gs-app
+        working-directory: apps/gateway-soft
         run: $Q pnpm exec playwright test ci-fixture-smoke
 
       - name: Rust tests
         run: $Q cargo test --workspace
 
       - name: Cargo check Tauri shell
-        run: $Q cargo check --manifest-path crates/gs-app/src-tauri/Cargo.toml
+        run: $Q cargo check --manifest-path apps/gateway-soft/src-tauri/Cargo.toml
 
       - name: Upload the encrypted log
         if: failure()

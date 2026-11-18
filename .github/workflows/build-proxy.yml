@@ -80,14 +80,14 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
-      # Gradle's rustBuild task runs `pnpm tauri android android-studio-script` in proxy/app.
+      # Gradle's rustBuild task runs `pnpm tauri android android-studio-script` in apps/gateway-proxy.
 
       - name: Release signing
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        working-directory: proxy/app/src-tauri/gen/android
+        working-directory: apps/gateway-proxy/src-tauri/gen/android
         run: |
           set -euo pipefail
           if [ -z "${ANDROID_KEYSTORE_BASE64}" ] || [ -z "${ANDROID_KEY_ALIAS}" ] || [ -z "${ANDROID_KEY_PASSWORD}" ]; then
@@ -108,7 +108,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tauriScript: node ${{ github.workspace }}/.ci/ci/quiet.mjs pnpm tauri
-          projectPath: proxy/app
+          projectPath: apps/gateway-proxy
           mobile: android
           args: --apk --target aarch64 --target armv7
           tagName: v__VERSION__
@@ -131,4 +131,4 @@ jobs:
 
       - name: Remove the keystore
         if: always()
-        run: rm -f proxy/app/src-tauri/gen/android/release.jks proxy/app/src-tauri/gen/android/keystore.properties
+        run: rm -f apps/gateway-proxy/src-tauri/gen/android/release.jks apps/gateway-proxy/src-tauri/gen/android/keystore.properties
