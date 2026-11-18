@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Gateway Soft">
+  <!-- Flat: many modems converge into one gateway and go out. macOS grid: 824 px tile, 100 px margin. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#4F46E5"/>
+  <g stroke="#FFFFFF" stroke-width="34" stroke-linecap="round" fill="none">
+    <path d="M300 330 C420 330 420 512 512 512"/>
+    <path d="M300 512 H512"/>
+    <path d="M300 694 C420 694 420 512 512 512"/>
+    <path d="M512 512 H700"/>
+  </g>
+  <g fill="#FFFFFF">
+    <circle cx="290" cy="330" r="44"/>
+    <circle cx="290" cy="512" r="44"/>
+    <circle cx="290" cy="694" r="44"/>
+    <circle cx="512" cy="512" r="78"/>
+  </g>
+  <path d="M686 430 L790 512 L686 594 Z" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="20" stroke-linejoin="round"/>
+</svg>
